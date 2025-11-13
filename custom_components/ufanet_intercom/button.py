@@ -45,26 +45,30 @@ class UfanetButton(ButtonEntity):
         name="Open",
     )
 
+    _attr_should_poll = False
+
     def __init__(self, session, api: UfanetAPI, intercom: Intercom) -> None:
         """Init intercom button."""
         super().__init__()
         self._api = api
         self._intercom = intercom
         self.session = session
+        self._attr_unique_id = f"{intercom.id}_button"
+        self._attr_name = f"{intercom.custom_name} door button"
+        self._attr_available = True
 
-    @property
-    def name(self) -> str:
-        """Return name of Therion open door button."""
-        return f"{self._intercom.custom_name} door button"
-
-    async def async_update(self):
-        """Update."""
-
-    async def async_press(self):
+    async def async_press(self) -> None:
         """Press button."""
-        await self._api.open_intercom(self._intercom.id)
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return f"{self._intercom.id}button"
+        try:
+            await self._api.open_intercom(self._intercom.id)
+            # Optional: provide feedback in UI
+            self._attr_icon = "mdi:lock-open-check"
+            self.async_write_ha_state()
+            # Reset icon after delay
+            await asyncio.sleep(2)
+            self._attr_icon = "mdi:lock-open"
+            self.async_write_ha_state()
+        except Exception as ex:
+            _LOGGER.error("Failed to open intercom %s: %s", self._intercom.id, ex)
+            self._attr_available = False
+            self.async_write_ha_state()
