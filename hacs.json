@@ -1,0 +1,12 @@
+{
+    "name": "Уфанет Домофон / Ufanet Intercom",
+    "content_in_root": false,
+    "zip_release": false,
+    "render_readme": true,
+    "domains": [
+        "camera",
+        "button"
+    ],
+    "country": "ru",
+    "iot_class": "Cloud Polling"
+}
