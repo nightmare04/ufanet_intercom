@@ -1,0 +1,13 @@
+{
+  "domain": "ufanet_intercom",
+  "name": "Ufanet intercom integration",
+  "codeowners": ["@nightmare04"],
+  "dependencies": [],
+  "config_flow": true,
+  "documentation": "https://github.com/nightmare04/ha_therion_intercom",
+  "issue_tracker": "https://github.com/nightmare04/ha_therion_intercom/issue",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
