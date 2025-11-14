@@ -28,7 +28,7 @@ async def async_setup_entry(
             _LOGGER.error("Failed to authenticate with Ufanet API")
             return False
 
-        hass.data[DOMAIN][config_entry.api] = api
+        hass.data[DOMAIN][config_entry.entry_id] = api
 
         # Forward the setup to the camera, button, sensor platform.
         await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)

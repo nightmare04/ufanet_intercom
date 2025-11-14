@@ -1,13 +1,11 @@
 import asyncio
 import logging
-import ssl
 from json.decoder import JSONDecodeError
 from typing import Any, Dict, List, Union
 from urllib.parse import urljoin
 from uuid import UUID, uuid4
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-import certifi
-from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from aiohttp.client_exceptions import ClientConnectorError, ContentTypeError
 
 from .exceptions import (
@@ -17,7 +15,7 @@ from .exceptions import (
     UnknownUfanetIntercomAPIError,
 )
 from .safe_logger import SafeLogger
-from .models import Intercom, Token, UCamera
+from .models import Intercom, Token, UCamera, Contract
 
 
 class UfanetIntercomAPI:
@@ -25,6 +23,7 @@ class UfanetIntercomAPI:
         self,
         contract: str,
         password: str,
+        hass: HomeAssistant,
         timeout: int = 30,
         level: logging = logging.INFO,
     ):
@@ -36,11 +35,8 @@ class UfanetIntercomAPI:
         self._base_url: str = "https://dom.ufanet.ru/"
         self._logger = SafeLogger("UfanetIntercomAPI")
         self._logger.setLevel(level)
+        self._session = async_get_clientsession(hass)
 
-    async def _ensure_session(self):
-        """Ensure we have a ClientSession."""
-        if self._session is None:
-            self._session = ClientSession()
 
     async def _send_request(
         self,
@@ -49,7 +45,6 @@ class UfanetIntercomAPI:
         params: Dict[str, Any] = None,
         json: Dict[str, Any] = None,
     ) -> Union[Dict[str, Any], List[Dict[str, Any]], None]:
-        await self._ensure_session()
         while True:
             headers = {"Authorization": f"JWT {self._token}"}
             request_id = uuid4().hex
@@ -84,8 +79,6 @@ class UfanetIntercomAPI:
                         raise UnknownUfanetIntercomAPIError(
                             f"Unknown error: {response.status} {response.reason}"
                         )
-                    finally:
-                        response.close()
                     if response.status == 401:
                         raise UnauthorizedUfanetIntercomAPIError(json_response)
 
@@ -160,9 +153,8 @@ class UfanetIntercomAPI:
         url = urljoin(self._base_url, "api/v1/cctv")
         response = await self._send_request(url=url)
         return [UCamera(**i) for i in response]
-
-    async def close(self):
-        """Close the ClientSession."""
-        if self._session:
-            await self._session.close()
-            self._session = None
+    
+    async def get_contract(self) -> Contract:
+        url = urljoin(self._base_url, "api/v0/contract/")
+        response = await self._send_request(url=url)
+        return Contract(**response[0])
