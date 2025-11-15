@@ -47,29 +47,16 @@ class UfanetDataCoordinator(DataUpdateCoordinator):
 
         _LOGGER.debug("Authentication successful")
 
-    async def async_initialize_intercoms(self):
-        """Initialize intercoms list on startup."""
-        self.intercoms = await self.api.async_get_intercoms()
-        self.cameras = await self.api.async_get_cameras()
-        _LOGGER.debug("Found %d intercoms", len(self.intercoms))
-
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API - только баланс, камеры обновляются отдельно."""
         try:
-            # Initialize intercoms if not done yet
-            await self.async_initialize_intercoms()
-
-            # Fetch only balance (cameras handle their own updates via RTSP)
+            intercoms_data = await self.api.async_get_intercoms()
+            cameras_data = await self.api.async_get_cameras()
             balance_data = await self.api.async_get_balance()
 
-            # Handle balance exception
-            if isinstance(balance_data, Exception):
-                _LOGGER.error("Balance data error: %s", balance_data)
-                balance_data = 0
-
             return {
-                "intercoms": self.intercoms,
-                "cameras": self.cameras,
+                "intercoms": intercoms_data,
+                "cameras": cameras_data,
                 "balance": balance_data,
                 "last_update": time.time(),
             }

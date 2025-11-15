@@ -3,11 +3,8 @@
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
 
-from .api import UfanetAPI as API
 from .const import DOMAIN, PLATFORMS
 from .coordinator import UfanetDataCoordinator
 
@@ -21,7 +18,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     try:
         await coordinator.async_config_entry_first_refresh()
-        await coordinator.async_initialize_intercoms()
     except Exception as err:
         _LOGGER.error("Failed to setup integration: %s", err)
         return False

@@ -91,23 +91,20 @@ class UfanetAPI:
     async def async_get_balance(self) -> float:
         """Get balance."""
         return 100
-        # if not self._token:
-        #     await self.async_authenticate()
-        # try:
-        #     async with self._session.get(
-        #         f"{self._host}{API_CONTRACT}",
-        #         headers={"Authorization": f"JWT {self._token.access}"},
-        #         timeout=30,
-        #     ) as response:
-        #         response.raise_for_status()
-        #         data = await response.json()
-        #         return Contract(**data).balance
-        # except Exception as err:
-        #     _LOGGER.error("Error fetching balance: %s", err)
-        #     raise
 
     async def async_open_door(self, intercom_id: str) -> bool:
         """Send open door command to intercom."""
         api_endpoint = f"{self._host}{API_OPEN_DOOR.format(intercom_id=intercom_id)}"
-        await self._async_send_request(api_endpoint=api_endpoint, method="POST")
-        return True
+        if not self._token:
+            await self.async_authenticate()
+        try:
+            async with self._session.get(
+                api_endpoint,
+                headers={"Authorization": f"JWT {self._token.access}"},
+                timeout=30,
+            ) as response:
+                response.raise_for_status()
+                return True
+        except Exception as err:
+            _LOGGER.error("Error fetching cameras list: %s", err)
+            raise

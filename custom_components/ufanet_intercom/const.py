@@ -4,20 +4,16 @@ from homeassistant.const import Platform
 from datetime import timedelta
 
 DOMAIN = "ufanet_intercom"
-PLATFORMS = [Platform.CAMERA]
+PLATFORMS = [Platform.CAMERA, Platform.BUTTON]
 
 # Configuration
 CONF_HOST = "host"
 CONF_CONTRACT = "contract"
 CONF_PASSWORD = "password"
-CONF_TOKEN = "token"
-CONF_TOKEN_EXPIRES = "token_expires"
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 30
 UPDATE_INTERVAL = 30
-TOKEN_REFRESH_BEFORE_EXPIRY = timedelta(hours=24)
-SNAPSHOT_TIMEOUT = 10  # Timeout for RTSP snapshot
 
 # API endpoints
 API_AUTH = "api/v1/auth/auth_by_contract/"
@@ -27,6 +23,6 @@ API_CONTRACT = "/api/v0/contract"
 API_OPEN_DOOR = "api/v0/skud/shared/{intercom_id}/open/"
 
 # Attributes
-ATTR_INTERCOM_ID = "intercom_id"
+ATTR_CAMERA_NUMBER = "intercom_id"
 ATTR_RTSP_URL = "rtsp_url"
 ATTR_LAST_UPDATE = "last_update"

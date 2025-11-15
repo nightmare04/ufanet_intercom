@@ -1,43 +1,50 @@
-"""Therion intercom camera."""
+"""Ufanet door button."""
 
-from __future__ import annotations
-
-from datetime import timedelta
+import asyncio
 import logging
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import UfanetAPI
 from .const import DOMAIN
+from .coordinator import UfanetDataCoordinator
 from .models import Intercom
 
 _LOGGER = logging.getLogger(__name__)
-UPDATE_INTERVAL = timedelta(seconds=15)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
-) -> bool:
-    """Setup button from a config entry created in the integrations UI."""
-    api = hass.data[DOMAIN][entry.entry_id]
-    session = async_get_clientsession(hass)
-    intercoms = await api.get_intercoms()
+) -> None:
+    """Set up camera platform."""
+    coordinator: UfanetDataCoordinator = hass.data[DOMAIN][entry.entry_id]
+
+    # Wait for initial data to be available
+    if not coordinator.data:
+        await coordinator.async_request_refresh()
+
+    intercoms = coordinator.data.get("intercoms", [])
+    entities = []
+
     for intercom in intercoms:
         if intercom.is_fav:
-            async_add_entities(
-                [UfanetButton(session, api, intercom)], update_before_add=True
+            entities.append(UfanetButton(coordinator, intercom))
+            _LOGGER.debug(
+                "Created button for intercom %s ",
+                intercom.id,
             )
-    return True
+
+    _LOGGER.info("Setting up %d buttons", len(entities))
+    async_add_entities(entities)
 
 
-class UfanetButton(ButtonEntity):
-    """Therion intercom open_button."""
+class UfanetButton(CoordinatorEntity, ButtonEntity):
+    """Ufanet open_button."""
 
     entity_description = ButtonEntityDescription(
         key="button",
@@ -47,12 +54,12 @@ class UfanetButton(ButtonEntity):
 
     _attr_should_poll = False
 
-    def __init__(self, session, api: UfanetAPI, intercom: Intercom) -> None:
+    def __init__(self, coordinator: UfanetDataCoordinator, intercom: Intercom) -> None:
         """Init intercom button."""
-        super().__init__()
-        self._api = api
+        super().__init__(coordinator)
+        ButtonEntity.__init__(self)
+        self._coordinator = coordinator
         self._intercom = intercom
-        self.session = session
         self._attr_unique_id = f"{intercom.id}_button"
         self._attr_name = f"{intercom.custom_name} door button"
         self._attr_available = True
@@ -60,7 +67,7 @@ class UfanetButton(ButtonEntity):
     async def async_press(self) -> None:
         """Press button."""
         try:
-            await self._api.open_intercom(self._intercom.id)
+            await self._coordinator.api.async_open_door(self._intercom.id)
             # Optional: provide feedback in UI
             self._attr_icon = "mdi:lock-open-check"
             self.async_write_ha_state()
