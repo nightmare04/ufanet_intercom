@@ -18,6 +18,14 @@ class Role(BaseModel):
     name: str
 
 
+class Contract(BaseModel):
+    """Contract model."""
+
+    id: int
+    title: str
+    balance: int
+
+
 class Intercom(BaseModel):
     """Intercom model."""
 
@@ -72,9 +80,3 @@ class UCamera(BaseModel):
     def rtsp_url(self) -> str:
         """Get rtsp url from model."""
         return f"rtsp://{self.servers.domain}/{self.number}?token={self.token_l}"
-
-    @computed_field
-    @property
-    def name(self) -> str:
-        """Get rtsp url from model."""
-        return f"{self.number}"
