@@ -3,8 +3,8 @@
 from homeassistant.const import Platform
 from datetime import timedelta
 
-DOMAIN = "my_intercom"
-PLATFORMS = [Platform.CAMERA, Platform.SENSOR, Platform.BUTTON]
+DOMAIN = "ufanet_intercom"
+PLATFORMS = [Platform.CAMERA]
 
 # Configuration
 CONF_HOST = "https://dom.ufanet.ru/"

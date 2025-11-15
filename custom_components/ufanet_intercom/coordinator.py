@@ -1,69 +1,78 @@
-"""Data coordinator for My Integration."""
-
 import asyncio
 import logging
-from datetime import timedelta
-from typing import Any
+import time
+from datetime import datetime, timedelta
+from typing import Any, Dict, List
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .api import UfanetIntercomAPI
-from .const import DOMAIN, UPDATE_INTERVAL
+from .api import UfanetAPI
+from .const import DOMAIN, UPDATE_INTERVAL, TOKEN_REFRESH_BEFORE_EXPIRY
+from .models import Intercom
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class UfanetDataCoordinator(DataUpdateCoordinator):
     """Coordinator to manage data updates."""
-    
+
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry):
         """Initialize coordinator."""
         self.entry = entry
-        self.api = UfanetIntercomAPI(
-            hass=hass,
-            contract=entry.data["contract"],
-            password=entry.data["password"]
-        )
-        
+        self.api: UfanetAPI = entry.entry_id
+        self.intercoms: List[Intercom] = []
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(minutes=UPDATE_INTERVAL),
+            update_interval=timedelta(seconds=UPDATE_INTERVAL),
         )
-        
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch data from API."""
+
+    async def async_authenticate(self):
+        """Perform authentication and update config entry."""
+        auth_data = await self.api.async_authenticate()
+
+        # Calculate token expiry (10 days from now)
+        # expires_at = time.time() + 10 * 24 * 60 * 60  # 10 days in seconds
+        # self.token_expires = expires_at
+
+        # Update config entry with new token
+        hass = self.hass
+        new_data = {**self.entry.data}
+        new_data["token"] = self.api.token
+
+        hass.config_entries.async_update_entry(self.entry, data=new_data)
+
+        _LOGGER.debug("Authentication successful")
+
+    async def async_initialize_intercoms(self):
+        """Initialize intercoms list on startup."""
+        self.intercoms = await self.api.async_get_intercoms()
+        _LOGGER.debug("Found %d intercoms", len(self.intercoms))
+
+    async def _async_update_data(self) -> Dict[str, Any]:
+        """Fetch data from API - только баланс, камеры обновляются отдельно."""
         try:
-            # Fetch all data in parallel
-            camera_task = self.api.get_cameras()
-            intercom_task = self.api.get_intercoms()
-            contract_task = self.api.get_contract()
-            
-            camera_data, intercom_data, contract_data = await asyncio.gather(
-                camera_task, intercom_task, contract_task,
-                return_exceptions=True
-            )
-            
-            # Handle exceptions
-            if isinstance(camera_data, Exception):
-                _LOGGER.error("Camera data error: %s", camera_data)
-                camera_data = None
-            if isinstance(intercom_data, Exception):
-                _LOGGER.error("Intercom data error: %s", intercom_data)
-                intercom_data = 0
-            if isinstance(contract_data, Exception):
-                _LOGGER.error("Contract data error: %s", contract_data)
-                contract_data = {}
-                
+            # Initialize intercoms if not done yet
+            await self.async_initialize_intercoms()
+
+            # Fetch only balance (cameras handle their own updates via RTSP)
+            balance_data = await self.api.async_get_balance()
+
+            # Handle balance exception
+            if isinstance(balance_data, Exception):
+                _LOGGER.error("Balance data error: %s", balance_data)
+                balance_data = 0
+
             return {
-                "camera": camera_data,
-                "intercom": intercom_data,
-                "contract": contract_data,
-                "last_update": asyncio.get_event_loop().time()
+                "intercoms": self.intercoms,  # List of intercom info with RTSP URLs
+                "balance": balance_data,
+                "last_update": time.time(),
             }
-            
+
         except Exception as err:
             _LOGGER.error("Error updating data: %s", err)
             raise

@@ -3,41 +3,55 @@
 import logging
 from typing import Optional
 
-from homeassistant.components.camera import Camera
+from homeassistant.components.camera import (
+    Camera,
+    CameraEntityDescription,
+    CameraEntityFeature,
+    StreamType,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
 from .coordinator import UfanetDataCoordinator
+from .const import DOMAIN
+
 
 _LOGGER = logging.getLogger(__name__)
 
-class MyIntegrationCamera(CoordinatorEntity, Camera):
-    """Representation of My Integration Camera."""
-    
+
+class UfanetCamera(CoordinatorEntity, Camera):
+    """Representation of Ufanet Camera."""
+
+    _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_frontend_stream_type = StreamType.HLS
+    _attr_motion_detection_enabled = False
+
+    entity_description = CameraEntityDescription(
+        key="camera",
+        icon="mdi:doorbell-video",
+    )
+
     def __init__(self, coordinator: UfanetDataCoordinator, device_id: str):
         """Initialize the camera."""
         super().__init__(coordinator)
         Camera.__init__(self)
-        
+
         self._device_id = device_id
-        self._attr_name = "My Integration Camera"
+        self._attr_name = "Ufanet Camera"
         self._attr_unique_id = f"{device_id}_camera"
-        
+
     @property
     def device_info(self):
         """Return device information."""
         return {
             "identifiers": {(DOMAIN, self._device_id)},
         }
-        
-    async def async_camera_image(
-        self, width: Optional[int] = None, height: Optional[int] = None
-    ) -> Optional[bytes]:
-        """Return camera image."""
-        return self.coordinator.data.get("camera")
+
+    async def stream_source(self) -> str | None:
+        """Get stream link for Ufanet camera."""
+        return self._camera.rtsp_url
 
 
 async def async_setup_entry(
@@ -47,11 +61,8 @@ async def async_setup_entry(
 ) -> None:
     """Set up camera platform."""
     coordinator: UfanetDataCoordinator = hass.data[DOMAIN][entry.entry_id]
-    
-    async_add_entities([
-        MyIntegrationCamera(coordinator, entry.data["device_id"])
-    ])
 
+    async_add_entities([UfanetCamera(coordinator, entry.data["device_id"])])
 
 
 # """Camera for ufanet intercom."""
