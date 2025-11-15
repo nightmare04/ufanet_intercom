@@ -4,7 +4,7 @@ import logging
 
 from homeassistant import config_entries, core
 
-from .api import UfanetIntercomAPI
+from .api import UfanetAPI as API
 from .const import DOMAIN, PLATFORMS
 
 _LOGGER = logging.getLogger(__name__)
@@ -15,14 +15,14 @@ async def async_setup_entry(
 ) -> bool:
     """Set up platform from a ConfigEntry."""
     hass.data.setdefault(DOMAIN, {})
-    api = UfanetIntercomAPI(
-        config_entry.data["contract"],
-        config_entry.data["password"],
+    api = API(
+        hass=hass,
+        contract=config_entry.data["contract"],
+        password=config_entry.data["password"],
     )
     try:
         # Test connection during setup
-        await api.set_token()
-        if not api._token:
+        if not await api.async_authenticate():
             _LOGGER.error("Failed to authenticate with Ufanet API")
             return False
 
@@ -42,3 +42,4 @@ async def async_unload_entry(
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return unload_ok
+    return False

@@ -1,57 +1,120 @@
-"""Camera platform for My Integration."""
+"""Camera platform for My Intercom integration."""
 
+import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
-from homeassistant.components.camera import (
-    Camera,
-    CameraEntityDescription,
-    CameraEntityFeature,
-    StreamType,
-)
+from homeassistant.components.camera import Camera
+from homeassistant.components.ffmpeg import get_ffmpeg_manager
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const import ATTR_INTERCOM_ID, ATTR_RTSP_URL, DOMAIN, SNAPSHOT_TIMEOUT
 from .coordinator import UfanetDataCoordinator
-from .const import DOMAIN
-
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class UfanetCamera(CoordinatorEntity, Camera):
-    """Representation of Ufanet Camera."""
+class IntercomCamera(CoordinatorEntity, Camera):
+    """Representation of an Intercom Camera using RTSP stream."""
 
-    _attr_supported_features = CameraEntityFeature.STREAM
-    _attr_frontend_stream_type = StreamType.HLS
-    _attr_motion_detection_enabled = False
-
-    entity_description = CameraEntityDescription(
-        key="camera",
-        icon="mdi:doorbell-video",
-    )
-
-    def __init__(self, coordinator: UfanetDataCoordinator, device_id: str):
+    def __init__(
+        self, coordinator: UfanetDataCoordinator, intercom_info: dict[str, Any]
+    ) -> None:
         """Initialize the camera."""
         super().__init__(coordinator)
         Camera.__init__(self)
 
-        self._device_id = device_id
-        self._attr_name = "Ufanet Camera"
-        self._attr_unique_id = f"{device_id}_camera"
+        self._intercom_id = intercom_info["id"]
+        self._intercom_name = intercom_info.get("name", f"Intercom {self._intercom_id}")
+        self._rtsp_url = intercom_info.get("rtsp_url")
+        self._ffmpeg = get_ffmpeg_manager(self.hass)
+
+        self._attr_name = f"{self._intercom_name} Camera"
+        self._attr_unique_id = f"{self._intercom_id}_camera"
+
+        # Camera attributes for better UI integration
+        self._attr_brand = "My Intercom"
+        self._attr_model = "RTSP Camera"
 
     @property
     def device_info(self):
         """Return device information."""
         return {
-            "identifiers": {(DOMAIN, self._device_id)},
+            "identifiers": {(DOMAIN, self._intercom_id)},
+            "name": self._intercom_name,
+            "manufacturer": "My Intercom",
+            "model": "Smart Intercom",
         }
 
-    async def stream_source(self) -> str | None:
-        """Get stream link for Ufanet camera."""
-        return self._camera.rtsp_url
+    @property
+    def extra_state_attributes(self):
+        """Return additional camera attributes."""
+        return {
+            ATTR_INTERCOM_ID: self._intercom_id,
+            ATTR_RTSP_URL: self._rtsp_url,
+        }
+
+    @property
+    def rtsp_url(self) -> Optional[str]:
+        """Return RTSP URL for this camera."""
+        return self._rtsp_url
+
+    async def async_added_to_hass(self):
+        """When entity is added to hass."""
+        await super().async_added_to_hass()
+        _LOGGER.debug(
+            "Camera %s added to hass with RTSP URL: %s",
+            self._intercom_id,
+            self._rtsp_url,
+        )
+
+    async def async_camera_image(
+        self, width: Optional[int] = None, height: Optional[int] = None
+    ) -> Optional[bytes]:
+        """Return a still image response from the camera."""
+        if not self._rtsp_url:
+            _LOGGER.error("No RTSP URL for camera %s", self._intercom_id)
+            return None
+
+        _LOGGER.debug("Generating snapshot for camera %s from RTSP", self._intercom_id)
+
+        try:
+            # Generate snapshot from RTSP stream using ffmpeg
+            image = await asyncio.wait_for(
+                self._ffmpeg.async_get_image(
+                    self._rtsp_url,
+                    output_format="mjpeg",
+                    extra_cmd="-frames:v 1",  # Capture single frame
+                ),
+                timeout=SNAPSHOT_TIMEOUT,
+            )
+            return image
+
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                "Timeout generating snapshot for camera %s", self._intercom_id
+            )
+            return None
+        except Exception as err:
+            _LOGGER.error(
+                "Error generating snapshot for camera %s: %s", self._intercom_id, err
+            )
+            return None
+
+    async def async_stream_source(self) -> Optional[str]:
+        """Return the RTSP stream source."""
+        return self._rtsp_url
+
+    async def async_handle_web_rtsp_stream(self) -> bool:
+        """Handle RTSP stream for WebRTC."""
+        return True
+
+    async def async_update(self) -> None:
+        """Update camera entity - noop, updates handled by coordinator."""
+        pass
 
 
 async def async_setup_entry(
@@ -60,92 +123,28 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up camera platform."""
-    coordinator: UfanetDataCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: MyIntercomDataCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    async_add_entities([UfanetCamera(coordinator, entry.data["device_id"])])
+    # Wait for initial data to be available
+    if not coordinator.data:
+        await coordinator.async_request_refresh()
 
+    intercoms = coordinator.data.get("intercoms", [])
+    entities = []
 
-# """Camera for ufanet intercom."""
+    for intercom in intercoms:
+        # Only create camera if intercom has RTSP URL
+        if intercom.get("rtsp_url"):
+            entities.append(IntercomCamera(coordinator, intercom))
+            _LOGGER.debug(
+                "Created camera for intercom %s with RTSP: %s",
+                intercom["id"],
+                intercom["rtsp_url"],
+            )
+        else:
+            _LOGGER.warning(
+                "Intercom %s has no RTSP URL, skipping camera", intercom["id"]
+            )
 
-# from datetime import timedelta
-# import logging
-
-# from homeassistant.components.camera import Camera
-# from homeassistant.config_entries import ConfigEntry
-# from homeassistant.core import HomeAssistant
-# from homeassistant.helpers.aiohttp_client import async_get_clientsession
-# from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
-# from .api import UfanetIntercomAPI
-# from .const import DOMAIN
-# from .models import UCamera
-
-# _LOGGER = logging.getLogger(__name__)
-# SCAN_INTERVAL = timedelta(seconds=15)
-
-
-# async def async_setup_entry(
-#     hass: HomeAssistant,
-#     entry: ConfigEntry,
-#     async_add_entities: AddEntitiesCallback,
-# ) -> bool:
-#     """Set up camera from a config entry."""
-#     api = hass.data[DOMAIN][entry.entry_id]
-#     session = async_get_clientsession(hass)
-#     cameras = await api.get_cameras()
-
-#     for camera in cameras:
-#         async_add_entities([UfanetCamera(session, api, camera)], update_before_add=True)
-#     return True
-
-
-# class UfanetCamera(Camera):
-#     """Representation of Ufanet Camera."""
-
-#     def __init__(self, session, api: UfanetIntercomAPI, camera: UCamera) -> None:
-#         """Initialize the camera."""
-#         super().__init__()
-#         self._api = api
-#         self.camera = camera
-#         self.session = session
-
-#     async def async_camera_image(
-#         self, width: int | None = None, height: int | None = None
-#     ) -> bytes | None:
-#         """Return a still image from the camera."""
-#         try:
-#             # Implement image capture logic if API provides snapshots
-#             # Or use stream to generate still
-#             return await super().async_camera_image(width, height)
-#         except Exception as ex:
-#             _LOGGER.error("Failed to get camera image: %s", ex)
-#             return None
-
-#     async def stream_source(self) -> str | None:
-#         """Get stream link for Ufanet camera."""
-#         return self.camera.rtsp_url
-
-#     async def async_update(self) -> None:
-#         """Update camera state."""
-#         try:
-#             cameras = await self._api.get_cameras()
-#             for camera in cameras:
-#                 if camera.number == self.camera.number:
-#                     self.camera = camera
-#                     self._stream_source = camera.rtsp_url
-#                     self._attr_available = True
-#                     break
-#         except Exception as ex:
-#             _LOGGER.error("Failed to update camera %s: %s", self.camera.number, ex)
-#             self._attr_available = False
-
-#     @property
-#     def unique_id(self) -> str:
-#         """Return the unique ID of the sensor."""
-#         return f"{self.camera.number}"
-
-#     # @property
-#     # def suggested_object_id(self) -> str:
-#     #     """Return the suggested object ID."""
-#     #     # Ensure this returns a string
-#     #     return f"{self.camera.title}"
+    _LOGGER.info("Setting up %d intercom cameras", len(entities))
+    async_add_entities(entities)
