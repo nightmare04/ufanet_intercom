@@ -15,13 +15,11 @@ async def async_setup_entry(
 ) -> bool:
     """Set up platform from a ConfigEntry."""
     hass.data.setdefault(DOMAIN, {})
-
+    api = UfanetIntercomAPI(
+        config_entry.data["contract"],
+        config_entry.data["password"],
+    )
     try:
-        api = UfanetIntercomAPI(
-            config_entry.data["contract"],
-            config_entry.data["password"],
-        )
-
         # Test connection during setup
         await api.set_token()
         if not api._token:
@@ -29,7 +27,6 @@ async def async_setup_entry(
             return False
 
         hass.data[DOMAIN][config_entry.entry_id] = api
-
         # Forward the setup to the camera, button, sensor platform.
         await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
         return True
@@ -44,7 +41,4 @@ async def async_unload_entry(
 ) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        api = hass.data[DOMAIN].pop(entry.entry_id)
-        if api:
-            await api.close()
-    return unload_ok
+        return unload_ok

@@ -1,160 +1,107 @@
-import asyncio
+"""API client for My Intercom integration."""
+
 import logging
-from json.decoder import JSONDecodeError
-from typing import Any, Dict, List, Union
+import time
+from aiohttp import ClientSession
 from urllib.parse import urljoin
-from uuid import UUID, uuid4
+from .models import Token, Intercom, UCamera, Contract
+from typing import Any, List, Dict, Optional
+from .const import (
+    CONF_HOST,
+    API_AUTH,
+    API_CONTRACT,
+    API_CAMERAS,
+    API_INTERCOMS,
+    API_OPEN_DOOR,
+)
+from .exceptions import UfanetIntercomAPIError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from aiohttp.client_exceptions import ClientConnectorError, ContentTypeError
-
-from .exceptions import (
-    ClientConnectorUfanetIntercomAPIError,
-    TimeoutUfanetIntercomAPIError,
-    UnauthorizedUfanetIntercomAPIError,
-    UnknownUfanetIntercomAPIError,
-)
-from .safe_logger import SafeLogger
-from .models import Intercom, Token, UCamera, Contract
+_LOGGER = logging.getLogger(__name__)
 
 
-class UfanetIntercomAPI:
+class UfanetAPI:
+    """API client for Ufanet."""
+
     def __init__(
         self,
+        hass,
         contract: str,
         password: str,
-        hass: HomeAssistant,
-        timeout: int = 30,
-        level: logging = logging.INFO,
     ):
-        self._timeout = timeout
+        """Initialize API client."""
+        self.hass = hass
+        self._host = CONF_HOST
         self._contract = contract
         self._password = password
-        self._session = None
-        self._token: Union[str, None] = None
-        self._base_url: str = "https://dom.ufanet.ru/"
-        self._logger = SafeLogger("UfanetIntercomAPI")
-        self._logger.setLevel(level)
-        self._session = async_get_clientsession(hass)
+        self._token: Token | None = None
+        self._session: ClientSession = async_get_clientsession(hass)
+        self._maxretries = 3
 
+    @property
+    def token(self) -> Optional[str]:
+        """Get current token."""
+        return self._token.access
 
-    async def _send_request(
+    async def _async_send_request(
         self,
-        url: str,
+        api_endpoint: str,
         method: str = "GET",
-        params: Dict[str, Any] = None,
-        json: Dict[str, Any] = None,
-    ) -> Union[Dict[str, Any], List[Dict[str, Any]], None]:
-        while True:
-            headers = {"Authorization": f"JWT {self._token}"}
-            request_id = uuid4().hex
-            self._logger.info(
-                "Request=%s method=%s url=%s params=%s json=%s",
-                request_id,
-                method,
-                url,
-                params,
-                json,
-            )
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
+        headers = self._get_headers
+        url = urljoin(self._host, api_endpoint)
+        for attempt in range(self._max_retries + 1):
             try:
                 async with self._session.request(
                     method, url, params=params, json=json, headers=headers
                 ) as response:
-                    try:
-                        json_response = (
-                            await response.json()
-                            if 199 < response.status < 500
-                            else None
-                        )
-                    except (JSONDecodeError, ContentTypeError) as e:
-                        raw_response = await response.text()
-                        self._logger.error(
-                            "Response=%s unsuccessful request status=%s reason=%s raw=%s error=%s",
-                            request_id,
-                            response.status,
-                            response.reason,
-                            raw_response,
-                            e,
-                        )
-                        raise UnknownUfanetIntercomAPIError(
-                            f"Unknown error: {response.status} {response.reason}"
-                        )
                     if response.status == 401:
-                        raise UnauthorizedUfanetIntercomAPIError(json_response)
+                        # Token expired, reauthenticate
+                        await self.async_authenticate()
+                        continue
+                    response.raise_for_status()
+                    data = await response.json()
+                    return data
+            except Exception as err:
+                _LOGGER.error("Request error: %s", err)
+                raise
+            if attempt < self.max_retries:
+                raise UfanetIntercomAPIError("Превышено количество попыток")
 
-                    if response.status in (200,):
-                        self._logger.info(
-                            "Response=%s json_response=%s", request_id, json_response
-                        )
-                        return json_response
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers with authentication."""
+        if not self._token:
+            raise Exception("No token available")
 
-                    self._logger.error(
-                        "Response=%s unsuccessful request json_response=%s status=%s reason=%s",
-                        request_id,
-                        json_response,
-                        response.status,
-                        response.reason,
-                    )
-                    raise UnknownUfanetIntercomAPIError(json_response)
+        return {
+            "Authorization": f"Bearer {self._token.access}",
+            "Content-Type": "application/json",
+        }
 
-            except asyncio.exceptions.TimeoutError:
-                self._logger.error(
-                    "Response=%s TimeoutUfanetIntercomAPIError", request_id
-                )
-                raise TimeoutUfanetIntercomAPIError("Timeout error")
-
-            except ClientConnectorError:
-                self._logger.error(
-                    "Response=%s ClientConnectorUfanetIntercomAPIError", request_id
-                )
-                raise ClientConnectorUfanetIntercomAPIError("Client connector error")
-
-            except UnauthorizedUfanetIntercomAPIError as e:
-                self._logger.warning(
-                    "Response=%s UnauthorizedUfanetIntercomAPIError=%s, trying get jwt",
-                    request_id,
-                    e,
-                )
-                await self._prepare_token()
-
-    async def _prepare_token(self):
-        if self._token is None:
-            await self.set_token()
-        else:
-            try:
-                await self.token_verify()
-            except UnauthorizedUfanetIntercomAPIError:
-                await self.set_token()
-
-    async def token_verify(self):
-        url = urljoin(self._base_url, "api-token-verify/")
-        json = {"token": self._token}
-        await self._send_request(url=url, method="POST", json=json)
-
-    async def set_token(self) -> bool:
-        url = urljoin(self._base_url, "api/v1/auth/auth_by_contract/")
+    async def async_authenticate(self) -> Token:
+        """Authenticate and get token."""
         json = {"contract": self._contract, "password": self._password}
-        response = await self._send_request(url=url, method="POST", json=json)
-        self._token = Token(**response["token"]).refresh
-        if self._token:
-            return True
+        await self._async_send_request(api_endpoint=API_AUTH, method="POST", json=json)
+        return True
 
-    async def get_intercoms(self) -> List[Intercom]:
-        url = urljoin(self._base_url, "api/v0/skud/shared/")
-        response = await self._send_request(url=url)
+    async def async_get_intercoms(self) -> List[Intercom]:
+        """Get list of intercoms with RTSP URLs."""
+        response = await self._async_send_request(api_endpoint=API_INTERCOMS)
         return [Intercom(**i) for i in response]
 
-    async def open_intercom(self, intercom_id: int) -> bool:
-        url = urljoin(self._base_url, f"api/v0/skud/shared/{intercom_id}/open/")
-        response = await self._send_request(url=url)
-        return response["result"]
-
-    async def get_cameras(self) -> List[UCamera]:
-        url = urljoin(self._base_url, "api/v1/cctv")
-        response = await self._send_request(url=url)
+    async def async_get_cameras(self) -> List[UCamera]:
+        """Get list of intercoms with RTSP URLs."""
+        response = await self._async_send_request(api_endpoint=API_INTERCOMS)
         return [UCamera(**i) for i in response]
-    
-    async def get_contract(self) -> Contract:
-        url = urljoin(self._base_url, "api/v0/contract/")
-        response = await self._send_request(url=url)
-        return Contract(**response[0])
+
+    async def async_get_balance(self) -> float:
+        response = await self._async_send_request(api_endpoint=API_CONTRACT)
+        return Contract(**response).balance
+
+    async def async_open_door(self, intercom_id: str) -> bool:
+        """Send open door command to intercom."""
+        api_endpoint = f"{self._host}{API_OPEN_DOOR.format(intercom_id=intercom_id)}"
+        await self._async_send_request(api_endpoint=api_endpoint, method="POST")
+        return True
