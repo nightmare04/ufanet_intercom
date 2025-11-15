@@ -7,7 +7,11 @@ DOMAIN = "ufanet_intercom"
 PLATFORMS = [Platform.CAMERA]
 
 # Configuration
-CONF_HOST = "https://dom.ufanet.ru/"
+CONF_HOST = "host"
+CONF_CONTRACT = "contract"
+CONF_PASSWORD = "password"
+CONF_TOKEN = "token"
+CONF_TOKEN_EXPIRES = "token_expires"
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 30

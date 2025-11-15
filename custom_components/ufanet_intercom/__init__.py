@@ -2,43 +2,39 @@
 
 import logging
 
-from homeassistant import config_entries, core
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .api import UfanetAPI as API
 from .const import DOMAIN, PLATFORMS
+from .coordinator import UfanetDataCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(
-    hass: core.HomeAssistant, config_entry: config_entries.ConfigEntry
-) -> bool:
-    """Set up platform from a ConfigEntry."""
-    hass.data.setdefault(DOMAIN, {})
-    api = API(
-        hass=hass,
-        contract=config_entry.data["contract"],
-        password=config_entry.data["password"],
-    )
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up My Intercom from a config entry."""
+
+    coordinator = UfanetDataCoordinator(hass, entry)
+
     try:
-        # Test connection during setup
-        if not await api.async_authenticate():
-            _LOGGER.error("Failed to authenticate with Ufanet API")
-            return False
-
-        hass.data[DOMAIN][config_entry.entry_id] = api
-        # Forward the setup to the camera, button, sensor platform.
-        await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
-        return True
-
-    except Exception as ex:
-        _LOGGER.error("Error setting up Ufanet integration: %s", ex)
+        await coordinator.async_config_entry_first_refresh()
+        await coordinator.async_initialize_intercoms()
+    except Exception as err:
+        _LOGGER.error("Failed to setup integration: %s", err)
         return False
 
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = coordinator
 
-async def async_unload_entry(
-    hass: core.HomeAssistant, entry: config_entries.ConfigEntry
-) -> bool:
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return unload_ok

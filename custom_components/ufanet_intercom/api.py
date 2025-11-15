@@ -33,80 +33,78 @@ class UfanetAPI:
     ) -> None:
         """Initialize API client."""
         self.hass = hass
-        self._host = CONF_HOST
+        self._host = "https://dom.ufanet.ru/"
         self._contract = contract
         self._password = password
         self._token: Token | None = None
         self._session: ClientSession = async_get_clientsession(hass)
-        self._max_retries = 3
-
-    @property
-    def token(self):
-        """Get current token."""
-        return self._token.access  # type: ignore
-
-    async def _async_send_request(
-        self,
-        api_endpoint: str,
-        method: str = "GET",
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | list[dict[str, Any]] | None:
-        headers = self._get_headers
-        url = urljoin(self._host, api_endpoint)
-        for attempt in range(self._max_retries + 1):
-            try:
-                async with self._session.request(
-                    method,
-                    url,
-                    params=params,
-                    json=json,
-                    headers=headers,  # type: ignore
-                ) as response:
-                    if response.status == 401:
-                        # Token expired, reauthenticate
-                        await self.async_authenticate()
-                        continue
-                    response.raise_for_status()
-                    data = await response.json()
-                    return data
-            except Exception as err:
-                _LOGGER.error("Request error: %s", err)
-                raise
-            if attempt < self.max_retries:
-                raise UfanetIntercomAPIError("Превышено количество попыток")
-        return None
-
-    def _get_headers(self) -> dict[str, str]:
-        """Get headers with authentication."""
-        if not self._token:
-            raise Exception("No token available")
-
-        return {
-            "Authorization": f"Bearer {self._token.access}",
-            "Content-Type": "application/json",
-        }
 
     async def async_authenticate(self) -> bool:
         """Authenticate and get token."""
         json = {"contract": self._contract, "password": self._password}
-        await self._async_send_request(api_endpoint=API_AUTH, method="POST", json=json)
-        return True
+        try:
+            async with self._session.post(
+                f"{self._host}{API_AUTH}", json=json, timeout=30
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                self._token = Token(**data["token"])
+                return True
+        except Exception as err:
+            _LOGGER.error("Error auth: %s", err)
+            raise
 
     async def async_get_intercoms(self) -> list[Intercom]:
         """Get list of intercoms with RTSP URLs."""
-        response = await self._async_send_request(api_endpoint=API_INTERCOMS)
-        return [Intercom(**i) for i in response]  # type: ignore
+        if not self._token:
+            await self.async_authenticate()
+        try:
+            async with self._session.get(
+                f"{self._host}{API_INTERCOMS}",
+                headers={"Authorization": f"JWT {self._token.access}"},
+                timeout=30,
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                return [Intercom(**i) for i in data]
+        except Exception as err:
+            _LOGGER.error("Error fetching intercoms list: %s", err)
+            raise
 
     async def async_get_cameras(self) -> list[UCamera]:
         """Get list of intercoms with RTSP URLs."""
-        response = await self._async_send_request(api_endpoint=API_INTERCOMS)
-        return [UCamera(**i) for i in response]  # type: ignore
+        if not self._token:
+            await self.async_authenticate()
+        try:
+            async with self._session.get(
+                f"{self._host}{API_CAMERAS}",
+                headers={"Authorization": f"JWT {self._token.access}"},
+                timeout=30,
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                return [UCamera(**i) for i in data]
+        except Exception as err:
+            _LOGGER.error("Error fetching cameras list: %s", err)
+            raise
 
     async def async_get_balance(self) -> float:
         """Get balance."""
-        response = await self._async_send_request(api_endpoint=API_CONTRACT)
-        return Contract(**response).balance  # type: ignore
+        return 100
+        # if not self._token:
+        #     await self.async_authenticate()
+        # try:
+        #     async with self._session.get(
+        #         f"{self._host}{API_CONTRACT}",
+        #         headers={"Authorization": f"JWT {self._token.access}"},
+        #         timeout=30,
+        #     ) as response:
+        #         response.raise_for_status()
+        #         data = await response.json()
+        #         return Contract(**data).balance
+        # except Exception as err:
+        #     _LOGGER.error("Error fetching balance: %s", err)
+        #     raise
 
     async def async_open_door(self, intercom_id: str) -> bool:
         """Send open door command to intercom."""
