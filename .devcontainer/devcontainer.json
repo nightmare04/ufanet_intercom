@@ -1,0 +1,18 @@
+{
+  "name": "Home Assistant Development",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "homeassistant",
+  "workspaceFolder": "/workspace",
+  "settings": {
+    "python.pythonPath": "/usr/local/bin/python",
+    "python.languageServer": "Pylance",
+    "editor.formatOnSave": true
+  },
+  "extensions": [
+    "ms-python.python",
+    "charliermarsh.ruff",
+    "ms-python.vscode-pylance"
+  ],
+  "forwardPorts": [8123, 5678],
+  "postCreateCommand": "pip install -r requirements_dev.txt"
+}
