@@ -1,0 +1,9 @@
+homeassistant
+pytest-homeassistant-custom-component
+pytest-asyncio
+pytest-cov
+black
+ruff
+mypy
+debugpy
+ipdb

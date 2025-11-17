@@ -1,0 +1,9 @@
+{
+  "python.pythonPath": "venv/bin/python",
+  "python.analysis.extraPaths": [
+    "./custom_components"
+  ],
+  "files.watcherExclude": {
+    "**/__pycache__": true
+  }
+}
