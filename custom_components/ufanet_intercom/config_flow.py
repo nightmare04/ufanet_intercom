@@ -29,12 +29,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     contract=user_input[CONF_CONTRACT],
                     password=user_input[CONF_PASSWORD],
                 )
-
-                await api.async_authenticate()
-
-                await self.async_set_unique_id(user_input[CONF_CONTRACT])
-                self._abort_if_unique_id_configured()
-
+                await api.get_contract()
                 return self.async_create_entry(
                     title=f"Ufanet {user_input[CONF_CONTRACT]}", data=user_input
                 )

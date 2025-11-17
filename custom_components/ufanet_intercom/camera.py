@@ -32,11 +32,8 @@ async def async_setup_entry(
     # Wait for initial data to be available
     if not coordinator.data:
         await coordinator.async_request_refresh()
-
-    cameras = coordinator.data.get("cameras", [])
     entities = []
-
-    for camera in cameras:
+    for camera in coordinator.data.get("cameras"):
         entities.append(UfanetCamera(coordinator, camera))
         _LOGGER.debug(
             "Created camera %s with RTSP: %s",
@@ -84,14 +81,13 @@ class UfanetCamera(CoordinatorEntity, Camera):
             self._id,
             self._rtsp_url,
         )
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
+        )
 
     async def stream_source(self) -> Optional[str]:
         """Return the RTSP stream source."""
         return self._rtsp_url
-
-    async def async_update(self) -> None:
-        """Update camera entity - noop, updates handled by coordinator."""
-        pass
 
     @property
     def extra_state_attributes(self):
