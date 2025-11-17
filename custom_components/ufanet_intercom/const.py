@@ -4,7 +4,7 @@ from homeassistant.const import Platform
 from datetime import timedelta
 
 DOMAIN = "ufanet_intercom"
-PLATFORMS = [Platform.CAMERA, Platform.BUTTON]
+PLATFORMS = [Platform.CAMERA, Platform.BUTTON, Platform.SENSOR]
 
 # Configuration
 CONF_HOST = "host"
@@ -16,6 +16,7 @@ DEFAULT_SCAN_INTERVAL = 30
 UPDATE_INTERVAL = 30
 
 # API endpoints
+API_BASE_URL = "https://dom.ufanet.ru/"
 API_AUTH = "api/v1/auth/auth_by_contract/"
 API_INTERCOMS = "api/v0/skud/shared/"
 API_CAMERAS = "api/v1/cctv"

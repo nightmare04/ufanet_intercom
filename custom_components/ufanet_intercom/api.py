@@ -1,22 +1,31 @@
 """API client for My Intercom integration."""
 
+import asyncio
 import logging
 from typing import Any
 from urllib.parse import urljoin
-
-from aiohttp import ClientSession
+from json.decoder import JSONDecodeError
+from aiohttp.client_exceptions import ClientConnectorError, ContentTypeError
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from aiohttp import ClientSession, ClientTimeout
+
 from .const import (
+    API_BASE_URL,
     API_AUTH,
     API_CAMERAS,
     API_CONTRACT,
     API_INTERCOMS,
     API_OPEN_DOOR,
-    CONF_HOST,
+    DOMAIN,
 )
-from .exceptions import UfanetIntercomAPIError
+from .exceptions import (
+    UfanetIntercomAPIError,
+    UnknownUfanetIntercomAPIError,
+    UnauthorizedUfanetIntercomAPIError,
+    TimeoutUfanetIntercomAPIError,
+)
 from .models import Contract, Intercom, Token, UCamera
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,78 +42,83 @@ class UfanetAPI:
     ) -> None:
         """Initialize API client."""
         self.hass = hass
-        self._host = "https://dom.ufanet.ru/"
-        self._contract = contract
+        self._contract_number = contract
         self._password = password
+        self._contract: Contract | None = None
         self._token: Token | None = None
         self._session: ClientSession = async_get_clientsession(hass)
 
-    async def async_authenticate(self) -> bool:
-        """Authenticate and get token."""
-        json = {"contract": self._contract, "password": self._password}
-        try:
-            async with self._session.post(
-                f"{self._host}{API_AUTH}", json=json, timeout=30
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-                self._token = Token(**data["token"])
-                return True
-        except Exception as err:
-            _LOGGER.error("Error auth: %s", err)
-            raise
+    async def _send_request(
+        self,
+        api_endpoint: str,
+        method: str = "GET",
+        base_url: str = API_BASE_URL,
+        params: dict[str, Any] = None,
+        json: dict[str, Any] = None,
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
+        url = urljoin(base_url, api_endpoint)
+        while True:
+            try:
+                # If token unavalible, try to auth
+                if not self._token:
+                    _LOGGER.debug(f"{DOMAIN} Unavalible token, trying auth...")
+                    with self._session.request(
+                        url=f"{base_url}{API_AUTH}",
+                        method="POST",
+                        json={
+                            "contract": self._contract_number,
+                            "password": self._password,
+                        },
+                    ) as response:
+                        json_response = await response.json()
 
-    async def async_get_intercoms(self) -> list[Intercom]:
-        """Get list of intercoms with RTSP URLs."""
-        if not self._token:
-            await self.async_authenticate()
-        try:
-            async with self._session.get(
-                f"{self._host}{API_INTERCOMS}",
-                headers={"Authorization": f"JWT {self._token.access}"},
-                timeout=30,
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-                return [Intercom(**i) for i in data]
-        except Exception as err:
-            _LOGGER.error("Error fetching intercoms list: %s", err)
-            raise
+                    if response.status == 401:
+                        raise UnauthorizedUfanetIntercomAPIError(
+                            f"Ошибка, неверные имя пользователя или пароль: {response.status}"
+                        )
+                    if response.status == 200:
+                        self._token = Token(**json_response)
+                        _LOGGER.debug(f"{DOMAIN} Auth success, resend request.")
+                        continue
+                    raise UnknownUfanetIntercomAPIError(json_response)
+                # Request
+                with self._session.request(
+                    url=url,
+                    method=method,
+                    json=json,
+                    params=params,
+                    headers=self._get_headers(),
+                ) as response:
+                    json_response = (
+                        await response.json() if 199 < response.status < 500 else None
+                    )
+                    return json_response
+                raise UnknownUfanetIntercomAPIError(json_response)
 
-    async def async_get_cameras(self) -> list[UCamera]:
-        """Get list of intercoms with RTSP URLs."""
-        if not self._token:
-            await self.async_authenticate()
-        try:
-            async with self._session.get(
-                f"{self._host}{API_CAMERAS}",
-                headers={"Authorization": f"JWT {self._token.access}"},
-                timeout=30,
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-                return [UCamera(**i) for i in data]
-        except Exception as err:
-            _LOGGER.error("Error fetching cameras list: %s", err)
-            raise
+            except (JSONDecodeError, ContentTypeError) as e:
+                raise UnknownUfanetIntercomAPIError(
+                    f"Неизвестная ошибка: {response.status} {response.reason}, {e}"
+                )
+            except asyncio.exceptions.TimeoutError:
+                raise TimeoutUfanetIntercomAPIError("Timeout error")
 
-    async def async_get_balance(self) -> float:
-        """Get balance."""
-        return 100
+    def _get_headers(self) -> dict[str, Any]:
+        headers = {{"Authorization": f"JWT {self._token.access}"}}
+        return headers
 
-    async def async_open_door(self, intercom_id: str) -> bool:
-        """Send open door command to intercom."""
-        api_endpoint = f"{self._host}{API_OPEN_DOOR.format(intercom_id=intercom_id)}"
-        if not self._token:
-            await self.async_authenticate()
-        try:
-            async with self._session.get(
-                api_endpoint,
-                headers={"Authorization": f"JWT {self._token.access}"},
-                timeout=30,
-            ) as response:
-                response.raise_for_status()
-                return True
-        except Exception as err:
-            _LOGGER.error("Error fetching cameras list: %s", err)
-            raise
+    async def get_contract(self):
+        response = await self._send_request(api_endpoint=API_CONTRACT)
+        self._contract_number = Contract(**response)
+
+    async def get_intercoms(self) -> Contract:
+        response = await self._send_request(api_endpoint=API_INTERCOMS)
+        return [Intercom(**i) for i in response]
+
+    async def get_cameras(self) -> Contract:
+        response = await self._send_request(api_endpoint=API_CAMERAS)
+        return [UCamera(**i) for i in response]
+
+    async def open_door(self, intercom_id: int) -> bool:
+        api_endpoint = f"api/v0/skud/shared/{intercom_id}/open/"
+        response = await self._send_request(api_endpoint=api_endpoint)
+        return response["result"]
