@@ -12,8 +12,7 @@ CONF_CONTRACT = "contract"
 CONF_PASSWORD = "password"
 
 # Defaults
-DEFAULT_SCAN_INTERVAL = 30
-UPDATE_INTERVAL = 30
+UPDATE_INTERVAL = 60
 
 # API endpoints
 API_BASE_URL = "https://dom.ufanet.ru/"
