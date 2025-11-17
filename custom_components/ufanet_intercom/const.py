@@ -1,10 +1,7 @@
 """Constants for My Intercom integration."""
 
-from homeassistant.const import Platform
-from datetime import timedelta
-
 DOMAIN = "ufanet_intercom"
-PLATFORMS = [Platform.CAMERA, Platform.BUTTON, Platform.SENSOR]
+PLATFORMS = ["camera"]
 
 # Configuration
 CONF_HOST = "host"

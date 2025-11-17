@@ -36,9 +36,9 @@ class UfanetDataCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API - только баланс, камеры обновляются отдельно."""
         try:
-            intercoms_data = await self.api.async_get_intercoms()
-            cameras_data = await self.api.async_get_cameras()
-            contract_data = await self.api.async_get_contract()
+            intercoms_data = await self.api.get_intercoms()
+            cameras_data = await self.api.get_cameras()
+            contract_data = await self.api.get_contract()
 
             return {
                 "intercoms": intercoms_data,

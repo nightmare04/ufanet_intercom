@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .models import Contract
+from .coordinator import UfanetDataCoordinator
 
 
 async def async_setup_entry(
@@ -19,29 +20,14 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensors."""
-    api = hass.data[DOMAIN][entry.entry_id]
-    intercoms = await api.get_intercoms()
-    contracts = await api.get_contract()
+    coordinator: UfanetDataCoordinator = hass.data[DOMAIN][entry.entry_id]
+    contracts = await coordinator.api.get_contract()
 
     sensors = []
-    for intercom in intercoms:
-        if intercom.is_fav:
-            sensors.append(IntercomStatusSensor(api, intercom))
 
     for contract in contracts:
         sensors.append
     async_add_entities(sensors)
-
-
-class IntercomStatusSensor(SensorEntity):
-    """Representation of intercom status sensor."""
-
-    def __init__(self, api, intercom):
-        self._api = api
-        self._intercom = intercom
-        self._attr_unique_id = f"{intercom.id}_status"
-        self._attr_name = f"{intercom.custom_name} Status"
-        self._attr_native_value = "online" if not intercom.is_blocked else "blocked"
 
 
 class SensorBalance(SensorEntity):

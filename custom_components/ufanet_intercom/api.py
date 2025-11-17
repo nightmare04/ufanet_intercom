@@ -48,6 +48,26 @@ class UfanetAPI:
         self._token: Token | None = None
         self._session: ClientSession = async_get_clientsession(hass)
 
+    async def _auth(self) -> bool:
+        json = {
+            "contract": self._contract_number,
+            "password": self._password,
+        }
+        url_auth = urljoin(API_BASE_URL, API_AUTH)
+        async with self._session.request(
+            method="POST", url=url_auth, json=json
+        ) as response:
+            json_response = await response.json()
+        if response.status == 401:
+            raise UnauthorizedUfanetIntercomAPIError(
+                f"Ошибка, неверные имя пользователя или пароль: {response.status}"
+            )
+        if response.status == 200:
+            self._token = Token(**json_response["token"])
+            return True
+
+        raise UnknownUfanetIntercomAPIError(json_response)
+
     async def _send_request(
         self,
         api_endpoint: str,
@@ -59,39 +79,20 @@ class UfanetAPI:
         url = urljoin(base_url, api_endpoint)
         while True:
             try:
-                # If token unavalible, try to auth
                 if not self._token:
-                    _LOGGER.debug(f"{DOMAIN} Unavalible token, trying auth...")
-                    with self._session.request(
-                        url=f"{base_url}{API_AUTH}",
-                        method="POST",
-                        json={
-                            "contract": self._contract_number,
-                            "password": self._password,
-                        },
-                    ) as response:
-                        json_response = await response.json()
-
-                    if response.status == 401:
-                        raise UnauthorizedUfanetIntercomAPIError(
-                            f"Ошибка, неверные имя пользователя или пароль: {response.status}"
-                        )
-                    if response.status == 200:
-                        self._token = Token(**json_response)
-                        _LOGGER.debug(f"{DOMAIN} Auth success, resend request.")
-                        continue
-                    raise UnknownUfanetIntercomAPIError(json_response)
-                # Request
-                with self._session.request(
+                    await self._auth()
+                headers = self._get_headers()
+                async with self._session.request(
                     url=url,
                     method=method,
                     json=json,
                     params=params,
-                    headers=self._get_headers(),
+                    headers=headers,
                 ) as response:
                     json_response = (
                         await response.json() if 199 < response.status < 500 else None
                     )
+                    response.url
                     return json_response
                 raise UnknownUfanetIntercomAPIError(json_response)
 
@@ -103,7 +104,7 @@ class UfanetAPI:
                 raise TimeoutUfanetIntercomAPIError("Timeout error")
 
     def _get_headers(self) -> dict[str, Any]:
-        headers = {{"Authorization": f"JWT {self._token.access}"}}
+        headers = {"Authorization": f"JWT {self._token.access}"}
         return headers
 
     async def get_contract(self):
